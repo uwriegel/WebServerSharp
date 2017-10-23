@@ -1,4 +1,5 @@
 ﻿using System;
+using WebServer;
 
 namespace Tester
 {
@@ -6,6 +7,8 @@ namespace Tester
     {
         static void Main(string[] args)
         {
+            var configuration = new Configuration();
+            configuration.Webroot = ".";
             Console.WriteLine("Hello World!");
         }
     }
