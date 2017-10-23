@@ -8,10 +8,11 @@ namespace Tester
         static void Main(string[] args)
         {
             var server = new Server(new Configuration{
-                Port = 20000
+                Port = 20000,
+                Webroot = "/home/uwe/Projekte/Node/WebServerElectron/web"
             });
             server.Start();
-            System.Threading.Thread.Sleep(10000);
+            Console.ReadLine();
             server.Stop();
         }
     }

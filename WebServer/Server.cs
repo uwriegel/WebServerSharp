@@ -170,7 +170,7 @@ namespace WebServer
         }
 
         TcpListener listener;
-        TcpListener tlsListener;
-        TcpListener tlsRedirectorListener;        
+        TcpListener tlsListener = null;
+        TcpListener tlsRedirectorListener = null;        
     }
 }
