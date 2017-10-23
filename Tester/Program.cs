@@ -7,9 +7,12 @@ namespace Tester
     {
         static void Main(string[] args)
         {
-            var configuration = new Configuration();
-            configuration.Webroot = ".";
-            Console.WriteLine("Hello World!");
+            var server = new Server(new Configuration{
+                Port = 20000
+            });
+            server.Start();
+            System.Threading.Thread.Sleep(10000);
+            server.Stop();
         }
     }
 }

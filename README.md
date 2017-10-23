@@ -18,5 +18,11 @@ in program.cs:
 var configuration = new Configuration();
 click bulb: add Reference using WebServer
 
+SocketError on Ubuntu: permission denied:
+sudo apt-get install libcap2-bin
+sudo setcap cap_net_bind_service=+ep /usr/share/dotnet/dotnet
+Debugging not possible with port 80
 
+Debugging: port 20000
+sudo setcap -r /usr/share/dotnet/dotnet
 

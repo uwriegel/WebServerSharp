@@ -23,7 +23,7 @@ namespace WebServer
         }
         string _Webroot;    
 
-        public int SocketTimeout { get; set; } = 20000;
+        public int SocketTimeout { get; set; } = 80;
 
         public int Port { get; set; } = 80;
         public int TlsPort { get; set; } = 443;
