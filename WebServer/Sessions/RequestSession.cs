@@ -5,6 +5,7 @@ using System.Linq;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace WebServer
 {
@@ -46,10 +47,27 @@ namespace WebServer
             this.networkStream = networkStream;
         }        
 
-        public void BeginStart()
+        public async Task<bool> StartAsync()
         {
-            networkStream.BeginRead(readBuffer, 0, readBuffer.Length, OnRead, null);
-        }        
+            try
+            {
+                int result = await networkStream.ReadAsync(readBuffer, 0, readBuffer.Length);
+                if (result == 0)
+                    return false;
+                return await ReceiveAsync(result);
+            }
+            catch (Exception e) when (e is IOException || e is CloseException || e is SocketException)
+            {
+                Close(true);
+                return false;
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine($"An error has occurred while reading socket: {e}");
+                Close(true);
+                return false;
+            }
+        }
 
         public void Close(bool fullClose = false)
         {
@@ -62,7 +80,7 @@ namespace WebServer
                 SocketSession.Client.Client.Shutdown(SocketShutdown.Send);
         }
 
-        public void SendError(string htmlHead, string htmlBody, int errorCode, string errorText)
+        public async Task SendErrorAsync(string htmlHead, string htmlBody, int errorCode, string errorText)
         {
             string response = string.Format("<html><head>{0}</head><body>{1}</body></html>", htmlHead, htmlBody);
             byte[] responseBytes = Encoding.UTF8.GetBytes(response);
@@ -72,25 +90,22 @@ namespace WebServer
             responseHeaders.Add("Content-Length", $"{responseBytes.Length}");
             responseHeaders.Add("Content-Type", "text/html; charset = UTF-8");
             var headerBuffer = responseHeaders.Access(HttpResponseString);
-            lock (locker)
-            {
-                Write(headerBuffer, 0, headerBuffer.Length);
-                Write(responseBytes, 0, responseBytes.Length);
-            }
+            await WriteAsync(headerBuffer, 0, headerBuffer.Length);
+            await WriteAsync(responseBytes, 0, responseBytes.Length);
         }
 
-        public void Send503()
+        public async Task Send503Async()
         {
             string headerString = $"{HttpResponseString} 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n";
             byte[] vorspannBuffer = ASCIIEncoding.ASCII.GetBytes(headerString);
-            networkStream.Write(vorspannBuffer, 0, vorspannBuffer.Length);
+            await networkStream.WriteAsync(vorspannBuffer, 0, vorspannBuffer.Length);
 
-            responseHeaders.SetInfo(305, 0);
+            //responseHeaders.SetInfo(305, 0);
         }
 
-        public void SendNotFound()
+        public async Task SendNotFoundAsync()
         {
-            SendError(
+            await SendErrorAsync(
 @"<title>CAESAR</title>
 <Style> 
 html {
@@ -104,25 +119,25 @@ h1 {
                 404, "Not Found");
         }
 
-        public void SendFile(string file)
+        public async Task SendFileAsync(string file)
         {
             if (file.EndsWith(".mp4", StringComparison.InvariantCultureIgnoreCase)
                 || file.EndsWith(".mkv", StringComparison.InvariantCultureIgnoreCase)
                 || file.EndsWith(".mp3", StringComparison.InvariantCultureIgnoreCase)
                 || file.EndsWith(".wav", StringComparison.InvariantCultureIgnoreCase))
-                SendRange(file);
+                await SendRangeAsync(file);
             else
-                InternalSendFile(file);
+                await InternalSendFileAsync(file);
         }
 
-        public void SendStream(Stream stream, string contentType, string lastModified, bool noCache)
+        public async Task SendStreamAsync(Stream stream, string contentType, string lastModified, bool noCache)
         {
             if (!noCache)
             {
                 string isModifiedSince = Headers["if-modified-since"];
                 if (isModifiedSince == NotModified)
                 {
-                    Send304();
+                    await Send304Async();
                     return;
                 }
             }
@@ -150,7 +165,7 @@ h1 {
                 }
                 using (compressedStream)
                 {
-                    stream.CopyTo(compressedStream);
+                    await stream.CopyToAsync(compressedStream);
                     compressedStream.Close();
                     stream = ms;
                 }
@@ -169,7 +184,7 @@ h1 {
             }
 
             var headerBuffer = responseHeaders.Access(HttpResponseString);
-            Write(headerBuffer, 0, headerBuffer.Length);
+            await WriteAsync(headerBuffer, 0, headerBuffer.Length);
 
             if (Headers.Method == Method.HEAD)
                 return;
@@ -177,24 +192,18 @@ h1 {
             byte[] bytes = new byte[8192];
             while (true)
             {
-                int read = stream.Read(bytes, 0, bytes.Length);
+                int read = await stream.ReadAsync(bytes, 0, bytes.Length);
                 if (read == 0)
                     return;
-                Write(bytes, 0, read);
+                await WriteAsync(bytes, 0, read);
             }
         }
 
-        public void Write(byte[] buffer)
-        {
-            networkStream.Write(buffer, 0, buffer.Length);
-        }
+        public async Task WriteAsync(byte[] buffer) => await networkStream.WriteAsync(buffer, 0, buffer.Length);
 
-        public void Write(byte[] buffer, int offset, int length)
-        {
-            networkStream.Write(buffer, offset, length);
-        }
+        public async Task WriteAsync(byte[] buffer, int offset, int length) => await networkStream.WriteAsync(buffer, offset, length);
 
-        void InternalSendFile(string file)
+        async Task InternalSendFileAsync(string file)
         {
             FileInfo fi = new FileInfo(file);
             bool noCache = Server.Configuration.NoCacheFiles.Contains(file.ToLower());
@@ -212,7 +221,7 @@ h1 {
                     TimeSpan diff = fileTime - ifModifiedSince;
                     if (diff <= TimeSpan.FromMilliseconds(0))
                     {
-                        Send304();
+                        await Send304Async();
                         return;
                     }
                 }
@@ -245,7 +254,7 @@ h1 {
             try
             {
                 using (Stream stream = File.OpenRead(file))
-                    SendStream(stream, contentType, lastModified, noCache);
+                    await SendStreamAsync(stream, contentType, lastModified, noCache);
             }
             catch (Exception e)
             {
@@ -253,12 +262,12 @@ h1 {
             }
         }
 
-        bool Receive(int bufferPosition)
+        async Task<bool> ReceiveAsync(int bufferPosition)
         {
             try
             {
                 Headers = new RequestHeaders();
-                var result = (Headers as Headers).Initialize(networkStream, readBuffer, bufferPosition);
+                var result = await (Headers as Headers).InitializeAsync(networkStream, readBuffer, bufferPosition);
                 bufferEndPosition = result.BufferEndPosition;
                 readFromBuffer = bufferEndPosition > 0;
                 bufferReadCount = result.BufferReadCount;
@@ -283,7 +292,7 @@ h1 {
                 bool isDirectory = Headers.Url.EndsWith("/");
                 string file = CheckFile(Headers.Url);
                 if (!string.IsNullOrEmpty(file))
-                    SendFile(file);
+                    await SendFileAsync(file);
                 else
                 {
                     // if (Headers.Url == "/$$GC")
@@ -294,7 +303,7 @@ h1 {
                     // else if (Headers.Url == "/$$Resources")
                     //     Resources.Current.Send(this);
                     if (!isDirectory)
-                        RedirectDirectory(Headers.Url + '/');
+                        await RedirectDirectoryAsync(Headers.Url + '/');
                     else
                     {
                         if (Headers.Url.Length > 2)
@@ -306,7 +315,7 @@ h1 {
                             FileInfo fi = new FileInfo(path);
                             if (fi.Exists)
                             {
-                                RedirectDirectory(url);
+                                await RedirectDirectoryAsync(url);
                                 return true;
                             }
                         }
@@ -317,18 +326,18 @@ h1 {
                             FileInfo fi = new FileInfo(path);
                             if (fi.Exists)
                             {
-                                RedirectDirectory("/root/");
+                                await RedirectDirectoryAsync("/root/");
                                 return true;
                             }
                         }
-                        SendNotFound();
+                        await SendNotFoundAsync();
                     }
                 }
                 return true;
             }
             catch (ServiceUnavailableException)
             {
-                Send503();
+                await Send503Async();
                 return false;
             }
             catch (SocketException se)
@@ -364,11 +373,11 @@ h1 {
             }
         }
 
-        void RedirectDirectory(string redirectedUrl, bool checkIfExists = true)
+        async Task RedirectDirectoryAsync(string redirectedUrl, bool checkIfExists = true)
         {
             if (checkIfExists && string.IsNullOrEmpty(CheckFile(redirectedUrl)))
             {
-                SendNotFound();
+                await SendNotFoundAsync();
                 return;
             }
 
@@ -379,12 +388,8 @@ h1 {
                 string redirectHeaders = $"{HttpResponseString} 301 Moved Permanently\r\nLocation: {UrlRoot}{redirectedUrl}\r\nContent-Length: {responseBytes.Length}\r\n\r\n";
 
                 byte[] vorspannBuffer = ASCIIEncoding.ASCII.GetBytes(redirectHeaders);
-
-                lock (locker)
-                {
-                    networkStream.Write(vorspannBuffer, 0, vorspannBuffer.Length);
-                    networkStream.Write(responseBytes, 0, responseBytes.Length);
-                }
+                await networkStream.WriteAsync(vorspannBuffer, 0, vorspannBuffer.Length);
+                await networkStream.WriteAsync(responseBytes, 0, responseBytes.Length);
             }
         }
 
@@ -418,26 +423,24 @@ h1 {
             return null;
         }
 
-        void SendRange(string file)
+        async Task SendRangeAsync(string file)
         {
             // TODO: umstellen auf ResponseHeader
             // TODO: mp4, mp3, ...
             FileInfo fi = new FileInfo(file);
             using (Stream stream = File.OpenRead(file))
-            {
-                SendRange(stream, fi.Length, file, null);
-            }
+                await SendRangeAsync(stream, fi.Length, file, null);
         }
 
-        void SendRange(Stream stream, long fileLength, string file, string contentType)
+        async Task SendRangeAsync(Stream stream, long fileLength, string file, string contentType)
         {
             string rangeString = Headers["range"];
             if (rangeString == null)
             {
                 if (!string.IsNullOrEmpty(file))
-                    InternalSendFile(file);
+                    await InternalSendFileAsync(file);
                 else
-                    SendStream(stream, contentType, DateTime.Now.ToUniversalTime().ToString("r"), true);
+                    await SendStreamAsync(stream, contentType, DateTime.Now.ToUniversalTime().ToString("r"), true);
                 return;
             }
 
@@ -470,80 +473,32 @@ Content-Type: {contentType}
 
 ";
             byte[] vorspannBuffer = ASCIIEncoding.ASCII.GetBytes(headerString);
-            lock (locker)
+            await networkStream.WriteAsync(vorspannBuffer, 0, vorspannBuffer.Length);
+            byte[] bytes = new byte[40000];
+            long length = end - start;
+            stream.Seek(start, SeekOrigin.Begin);
+            long completeRead = 0;
+            while (true)
             {
-                networkStream.Write(vorspannBuffer, 0, vorspannBuffer.Length);
-                byte[] bytes = new byte[40000];
-                long length = end - start;
-                stream.Seek(start, SeekOrigin.Begin);
-                long completeRead = 0;
-                while (true)
-                {
-                    int read = stream.Read(bytes, 0, Math.Min(bytes.Length, (int)(contentLength - completeRead)));
-                    if (read == 0)
-                        return;
-                    completeRead += read;
-                    networkStream.Write(bytes, 0, read);
-                    if (completeRead == contentLength)
-                        return;
-                }
+                int read = await stream.ReadAsync(bytes, 0, Math.Min(bytes.Length, (int)(contentLength - completeRead)));
+                if (read == 0)
+                    return;
+                completeRead += read;
+                await networkStream.WriteAsync(bytes, 0, read);
+                if (completeRead == contentLength)
+                    return;
             }
         }
 
-        void Send304()
+        async Task Send304Async()
         {
             string headerString = $"{HttpResponseString} 304 Not Modified\r\n\r\n";
             byte[] vorspannBuffer = ASCIIEncoding.ASCII.GetBytes(headerString);
             responseHeaders.SetInfo(304, 0);
-            Write(vorspannBuffer, 0, vorspannBuffer.Length);
+            await WriteAsync(vorspannBuffer, 0, vorspannBuffer.Length);
         }
         
-        void OnRead(IAsyncResult asyncResult)
-        {
-            try
-            {
-                int result = networkStream.EndRead(asyncResult);
-                if (result == 0)
-                    return;
-                new Thread(OnQueuedRead)
-                {
-                    IsBackground = true
-                }.Start(result);
-            }
-            catch (Exception e) when (e is IOException || e is CloseException || e is SocketException)
-            {
-                Close(true);
-            }
-            catch (Exception e)
-            {
-                Console.WriteLine($"An error has occurred while reading socket: {e}");
-                Close(true);
-            }
-        }
-
-        void OnQueuedRead(object state)
-        {
-            try
-            {
-                var result = (int)state;
-                if (Receive(result))
-                    // Weitermachen in dieser SocketSession, ansonsten Verarbeitung abbrechen:
-                    SocketSession.BeginReceive();
-            }
-            catch (Exception e) when (e is IOException || e is CloseException || e is SocketException)
-            {
-                Close(true);
-            }
-            catch (Exception e)
-            {
-                Console.WriteLine($" An error has occurred while reading socket: {e}");
-                Close(true);
-            }
-        }        
-
         const string webSocketKeyConcat = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-
-        object locker = new object();
 
         Stream networkStream;
         byte[] readBuffer = new byte[20000];

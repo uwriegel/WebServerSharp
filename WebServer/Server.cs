@@ -104,7 +104,7 @@ namespace WebServer
                 Console.WriteLine("Stopping HTTP Listener...");
                 IsStarted = false;
 
-                //listener?.Stop();
+                listener?.Stop();
                 tlsListener?.Stop();
                 tlsRedirectorListener?.Stop();
 
@@ -116,43 +116,36 @@ namespace WebServer
             }
         }              
 
-        void StartConnecting(TcpListener listener, bool isSecured)
+        async void StartConnecting(TcpListener listener, bool isSecured)
         {
             if (!IsStarted)
                 return;
-            new Thread(() =>
+            try
             {
-                try
+                while (IsStarted)
                 {
-                    while (IsStarted)
-                    {
-                        var client = listener.AcceptTcpClient();
-                        OnConnected(client, isSecured);
-                    }
+                    var client = await listener.AcceptTcpClientAsync();
+                    OnConnected(client, isSecured);
                 }
-                catch (SocketException se) when (se.SocketErrorCode == SocketError.Interrupted && !IsStarted)
-                {
-                }
-                catch (Exception e)
-                {
-                    Console.WriteLine($"Error occurred in connecting thread: {e}");
-                }
-            })
+            }
+            catch (SocketException se) when (se.SocketErrorCode == SocketError.Interrupted && !IsStarted)
             {
-                IsBackground = true
-            }.Start();
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine($"Error occurred in connecting thread: {e}");
+            }
         }
         
-        void OnConnected(TcpClient tcpClient, bool isSecured)
+        async void OnConnected(TcpClient tcpClient, bool isSecured)
         {
             try
             {
-                Console.WriteLine("Verbinde...");
                 if (!IsStarted)
                     return;
 
                 var session = new SocketSession(this, tcpClient, isSecured);
-                session.BeginReceive();
+                await session.ReceiveAsync();
             }
             catch (SocketException se) when (se.NativeErrorCode == 10054)
             { }

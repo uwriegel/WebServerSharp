@@ -5,6 +5,7 @@ using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
+using System.Threading.Tasks;
 
 namespace WebServer
 {
@@ -27,7 +28,7 @@ namespace WebServer
             client.SendTimeout = server.Configuration.SocketTimeout;
         }        
 
-        public void BeginReceive()
+        public async Task ReceiveAsync()
         {
             try
             {
@@ -35,7 +36,9 @@ namespace WebServer
                     networkStream = UseTls ? GetTlsNetworkStream(Client) : Client.GetStream();
 
                 var session = new RequestSession(server, this, networkStream);
-                session.BeginStart();
+                while (true)
+                    if (!await session.StartAsync())
+                        break;
             }
             catch (AuthenticationException ae)
             {

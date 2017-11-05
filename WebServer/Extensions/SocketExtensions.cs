@@ -30,9 +30,6 @@ namespace WebServer
         /// </remarks>
         /// </summary>
         /// <param name="socke">Die Socket, in der der DulaMode aktiviert werden soll, bitte als Erweiterungsmethode aufrufen (TcpServer.Server.SetDualMode())!</param>
-        public static void SetDualMode(this Socket socke)
-        {
-            socke.SetSocketOption(SocketOptionLevel.IPv6, (SocketOptionName)27, 0);
-        }
+        public static void SetDualMode(this Socket socke) => socke.SetSocketOption(SocketOptionLevel.IPv6, (SocketOptionName)27, 0);
     }
 }

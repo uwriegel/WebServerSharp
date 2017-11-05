@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 
 namespace WebServer
 {
@@ -89,11 +90,10 @@ namespace WebServer
         /// <param name="recentbufferPosition">Die momentane Position im Netzwerkstrom</param>
         /// <param name="tracing"></param>
         /// <param name="sessionID"></param>
-        public Result Initialize(Stream networkStream, byte[] buffer, int recentbufferPosition)
+        public async Task<Result> InitializeAsync(Stream networkStream, byte[] buffer, int recentbufferPosition)
         {
-            Result result;
-            string headerstring = ReadHeaderFromStream(networkStream, buffer, recentbufferPosition, out result);
-            string[] headerParts = headerstring.Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
+            var result = await ReadHeaderFromStreamAsync(networkStream, buffer, recentbufferPosition);
+            string[] headerParts = result.headerString.Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
             InternalInitialize(headerParts);
 
             try
@@ -117,12 +117,12 @@ namespace WebServer
                     headers[keyValue.Key] = keyValue;
             }
 
-            return result;
+            return result.result;
         }
 
         protected abstract void InternalInitialize(string[] headerParts);
 
-        string ReadHeaderFromStream(Stream networkStream, byte[] buffer, int recentbufferPosition, out Result result)
+        async Task<(string headerString, Result result)> ReadHeaderFromStreamAsync(Stream networkStream, byte[] buffer, int recentbufferPosition)
         {
             int index = 0;
             int read = recentbufferPosition;
@@ -131,13 +131,10 @@ namespace WebServer
                 for (int i = index; i < Math.Min(read + index, buffer.Length); i++)
                 {
                     if (i > 4 && buffer[i] == '\n' && buffer[i - 1] == '\r' && buffer[i - 2] == '\n')
-                    {
-                        result = new Result(i + 1, index + read);
-                        return Encoding.ASCII.GetString(buffer, 0, i - 1);
-                    }
+                        return (Encoding.ASCII.GetString(buffer, 0, i - 1), new Result(i + 1, index + read));
                 }
                 index += read;
-                read = networkStream.Read(buffer, index, buffer.Length - index);
+                read = await networkStream.ReadAsync(buffer, index, buffer.Length - index);
                 if (read == 0)
                     throw new CloseException();
             }
